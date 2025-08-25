@@ -38,35 +38,27 @@ def get_datasets(keywords: list) -> list:
     
     try:
         response = requests.get(NASA_CMR_URL, params=params)
-        response.raise_for_status()  # Raise an error for bad status codes
+        response.raise_for_status()
+        raw_data = response.json()
 
-        data = response.json()
-        entries = data.get('feed', {}).get('entry', [])
-        
-        clean_results = []
+        # --- REFINEMENT LOGIC STARTS HERE ---
+        clean_datasets = []
+        entries = raw_data.get('feed', {}).get('entry', [])
+
         for entry in entries:
-            # Extract only the data we need
-            title = entry.get('title', 'No Title')
-            summary = entry.get('summary', 'No Summary').strip()
-            
-            data_link = None
-            if 'links' in entry:
-                for link in entry['links']:
-                    if link.get('rel') == 'http://esipfed.org/ns/fedsearch/1.1/data#':
-                        data_link = link.get('href')
-                        break
-            
-            clean_results.append({
-                "title": title,
-                "summary": summary,
-                "link": data_link
-            })
+            clean_item = {
+                "title": entry.get('title', 'No Title Available'),
+                "summary": entry.get('summary', 'No summary available.').strip(),
+                # Find the DOI link, which is often the most stable one
+                "link": next((link['href'] for link in entry.get('links', []) if 'doi.org' in link.get('href', '')), None)
+            }
+            clean_datasets.append(clean_item)
         
-        return clean_results
+        return clean_datasets # Return the clean list, not the raw data
 
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching data from NASA API: {e}")
-        return []
+        print(f"Error fetching data: {e}")
+        return [] # Return an empty list on error
 
 # --- Gemini API Function ---
 
@@ -86,11 +78,16 @@ def get_explanation(title: str, summary: str) -> str:
 
     GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
 
-    prompt = (
-        "Explain the following NASA dataset to a high school student in two simple sentences. "
-        "Focus on what it measures and why it's important. "
-        f"Title: '{title}', Summary: '{summary}'"
-    )
+    prompt = f"""
+    Your role is a NASA science communicator.
+    Your task is to explain a complex dataset to a curious high school student.
+    Be clear, concise, and engaging. Do not exceed three sentences.
+
+    Dataset Title: "{title}"
+    Dataset Description: "{summary}"
+
+    Explanation:
+    """
 
     payload = {
         "contents": [{"parts": [{"text": prompt}]}]
